@@ -1,0 +1,144 @@
+---
+title: "Whole-Genome Sequencing, EPHI"
+output: html_notebook
+author: "E Reichert"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+---
+
+*Background*
+
+This script reads in the whole-genome sequencing (WGS) data for 23 EPHI samples subject to whole-genome sequencing + controls. These visualizations of WGS coverage around pfhrp2/3 (on Chr8 and Chr13, respectively) are utilized for comparing MIP/WGS calls in our manuscript Feleke et al, which identifies pfhrp2/3 deletion mutants in isolates from 2017-18 in Ethiopia. WGS is visualized as a normalized coverage score, defined as the median coverage at each 1kb window / median coverage across the genome.
+
+```{r}
+#load libraries
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(EnvStats)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(viridis)
+
+#IMPORT WGS DATA
+wgs_chr8 <- read_csv("hrp2_bowtie_Q0_binned_median_coverage.csv")
+wgs_chr13 <- read_csv("hrp3_bowtie_Q0_binned_median_coverage.csv")
+
+#Median WGS coverage across genome by sample
+coverage_stats <- read_csv("median_cov.csv") %>% select(barcode, median)
+```
+
+*Figure 1. WGS Coverage of Chr8 surrounding pfhrp2*
+
+```{r}
+#reformat so columns are labeled by median bin position (1kb bins)
+wgs_chr8 <- wgs_chr8 %>% 
+      separate_rows(c(2:201), sep = ",")
+
+wgs_chr8[1,] <- substr(wgs_chr8[1,],2,8)
+wgs_chr8[,2:ncol(wgs_chr8)] <- sapply(wgs_chr8[,2:ncol(wgs_chr8)],as.numeric)
+wgs_chr8[1,2:ncol(wgs_chr8)] <- wgs_chr8[1,2:ncol(wgs_chr8)] + 500
+colnames(wgs_chr8) <- as.character(unlist(wgs_chr8[1,]))
+wgs_chr8 = wgs_chr8[4:nrow(wgs_chr8),]
+colnames(wgs_chr8)[1] <- 'barcode'
+
+#keep only EPHI samples and Controls
+wgs_chr8 <- wgs_chr8 %>%
+  filter(str_detect(barcode, "^X") | barcode == "3D7" | barcode == "HB3" | barcode == "DD2")
+
+wgs_chr8$barcode[wgs_chr8$barcode == "3D7"] <- "XXXX3D7"
+wgs_chr8$barcode[wgs_chr8$barcode == "HB3"] <- "XXXXHB3"
+wgs_chr8$barcode[wgs_chr8$barcode == "DD2"] <- "XXXXDD2"
+
+coverage_stats$barcode[coverage_stats$barcode == "3D7"] <- "XXXX3D7"
+coverage_stats$barcode[coverage_stats$barcode == "HB3"] <- "XXXXHB3"
+coverage_stats$barcode[coverage_stats$barcode == "DD2"] <- "XXXXDD2"
+
+#reshape data into long format, keep genomic window of interest for visualization
+wgs_chr8 <- wgs_chr8 %>% gather(key = Gene, value = coverage, -barcode) %>%
+  mutate(Gene_num = as.numeric(Gene)) %>%
+  filter(Gene_num > 1324700 & Gene_num < 1424000) %>%
+  select(barcode, Gene, coverage)
+
+#merge in median coverage across whole genome
+hrp2_coverage <- wgs_chr8 %>%
+  left_join(., coverage_stats, by = "barcode") %>% filter(!is.na(median))
+
+hrp2_coverage$coverage[hrp2_coverage$coverage == 0] <- 0.01
+
+#Create normalized WGS coverage score
+#median coverage of 1kb bin/median coverage across genome
+hrp2_coverage <- hrp2_coverage %>% mutate(z_coverage = coverage/median) %>% 
+  arrange((median)) %>%
+  select(barcode, Gene, z_coverage)
+
+#order (desc) by median coverage across whole genome (best to worst coverage)
+hrp2_coverage$barcode <- fct_inorder(hrp2_coverage$barcode)
+
+breaks = c(seq(1273735, 1472735, 2000))
+
+#produce heatmap
+#pdf(file = "hrp2_wgs_standardized.pdf", width = 11, height = 6)
+p <- ggplot(hrp2_coverage, aes(x = Gene, y = barcode, fill= log10(z_coverage))) + 
+  geom_tile() +
+  scale_fill_viridis(discrete=FALSE, option = "plasma") + theme(axis.text.x = element_text(size = 5, angle = 90), axis.text.y = element_text(size = 5)) + scale_x_discrete(position = "top", breaks = breaks) + ylab("") + xlab("") + labs(fill = "WGS Coverage Score")
+p
+
+#dev.off()
+```
+
+*Figure 2. WGS Coverage of Chr13 surrounding pfhrp3*
+
+```{r}
+#reformat so columns are labeled by median bin position (1kb bins)
+wgs_chr13 <- wgs_chr13 %>% 
+      separate_rows(c(2:222), sep = ",")
+
+wgs_chr13[1,] <- substr(wgs_chr13[1,],2,8)
+wgs_chr13[,2:ncol(wgs_chr13)] <- sapply(wgs_chr13[,2:ncol(wgs_chr13)],as.numeric)
+wgs_chr13[1,2:ncol(wgs_chr13)] <- wgs_chr13[1,2:ncol(wgs_chr13)] + 500
+colnames(wgs_chr13) <- as.character(unlist(wgs_chr13[1,]))
+wgs_chr13 = wgs_chr13[4:nrow(wgs_chr13),]
+colnames(wgs_chr13)[1] <- 'barcode'
+
+#keep only EPHI samples and Controls
+wgs_chr13 <- wgs_chr13 %>%
+  filter(str_detect(barcode, "^X") | barcode == "3D7" | barcode == "HB3")
+
+wgs_chr13$barcode[wgs_chr13$barcode == "3D7"] <- "XXXX3D7"
+wgs_chr13$barcode[wgs_chr13$barcode == "HB3"] <- "XXXXHB3"
+wgs_chr13$barcode[wgs_chr13$barcode == "DD2"] <- "XXXXDD2"
+
+#reshape data into long format, keep genomic window of interest for visualization
+wgs_chr13 <- wgs_chr13 %>% gather(key = Gene, value = coverage, -barcode) %>%
+  mutate(Gene_num = as.numeric(Gene)) %>%
+  filter(Gene_num >= 2771226 & Gene_num <= 2891226) %>%
+  select(barcode, Gene, coverage)
+
+#merge in median coverage across whole genome
+hrp3_coverage <- wgs_chr13 %>%
+  left_join(., coverage_stats, by = "barcode") %>% filter(!is.na(median))
+
+#order by median coverage across genome
+hrp3_coverage$coverage[hrp3_coverage$coverage == 0] <- 0.01
+
+#Create normalized coverage score
+#median coverage of 1kb bin/median coverage across genome
+hrp3_coverage <- hrp3_coverage %>%
+  mutate(z_coverage = coverage/median) %>% arrange((median)) %>%
+  select(barcode, Gene, z_coverage)
+
+hrp3_coverage$barcode <- fct_inorder(hrp3_coverage$barcode)
+
+breaks = c(seq(2771226, 2891226, 2000))
+
+#produce heatmap
+#pdf(file = "hrp3_wgs_standardized.pdf", width = 10, height = 6)
+p <- ggplot(hrp3_coverage, aes(x = Gene, y = barcode, fill= log10(z_coverage))) + 
+  geom_tile() +
+  scale_fill_viridis(discrete=FALSE, option = "plasma") + theme(axis.text.x = element_text(size = 5, angle = 90), axis.text.y = element_text(size = 5), legend.position = "none") + scale_x_discrete(position = "top", breaks = breaks) + ylab("") + xlab("") + labs(fill = "WGS Coverage Score")
+p
+
+#dev.off()
+```
+
