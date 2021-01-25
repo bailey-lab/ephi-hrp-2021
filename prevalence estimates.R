@@ -20,7 +20,7 @@ library(readr)
 #read in our data
 meta <- read_csv("Meta_full_clean.csv")
 hrp23_pcr <- read_csv("Full_PCR_Clinical_clean.csv") %>%
-  filter(pfldh_pcr_parasitemia_mean > 100)
+  filter(pfldh_pcr_parasitemia_mean > 100 & !is.na(participant_ID))
 
 #get proportion of Pf-positives with discordant RDT profile
 
@@ -32,20 +32,20 @@ RDT_overall <- meta %>%
   summarise(n())
 
 disc_overall <- RDT_overall[[2,2]]/(RDT_overall[[1,2]]+RDT_overall[[2,2]])
-#13.1% of Pf infections have discordant RDT overall
+#13.3% of Pf infections have discordant RDT overall
 
 #by region
 RDT_reg <- meta %>%
   filter(rdt_pf_pos == 1) %>%
   mutate(discordant_RDT = rdt_discordant == 2) %>%
-  group_by(discordant_RDT, Region) %>%
+  group_by(discordant_RDT, Reg) %>%
   summarise(n())
 
 disc_AM <- RDT_reg[[4,3]]/(RDT_reg[[1,3]]+RDT_reg[[4,3]])
-#15.2% in Amhara
+#15.8% in Amhara
 
 disc_GA <- RDT_reg[[5,3]]/(RDT_reg[[2,3]]+RDT_reg[[5,3]])
-#1.6% in Gambella
+#1.5% in Gambella
 
 disc_TG <- RDT_reg[[6,3]]/(RDT_reg[[3,3]]+RDT_reg[[6,3]])
 #20.4% in Tigray
@@ -59,7 +59,7 @@ PCR_overall <- hrp23_pcr %>%
   summarise(n())
 
 pcr_rdt_concord <- PCR_overall[[1,2]]/(sum(PCR_overall$`n()`))
-#73.1% concordance between discordant RDT profile and pfhrp2- PCR call
+#72.7% concordance between discordant RDT profile and pfhrp2- PCR call
 
 ## APPROACH #1
 
@@ -69,15 +69,15 @@ pcr_rdt_concord <- PCR_overall[[1,2]]/(sum(PCR_overall$`n()`))
 
 #Overall across 3 regions
 ci.impt(RDT_overall[[2,2]], (RDT_overall[[1,2]]+RDT_overall[[2,2]]), PCR_overall[[1,2]], sum(PCR_overall$`n()`), conf = 0.95)
-# 9.6% prevalence estimate (95% CI 8.4-10.9)
+# 9.7% prevalence estimate (95% CI 8.5-11.1)
 
 #for Amhara
 ci.impt(RDT_reg[[4,3]], (RDT_reg[[1,3]]+RDT_reg[[4,3]]), PCR_overall[[1,2]], sum(PCR_overall$`n()`), conf = 0.95)
-# 11.1% prevalence estimate (9.5-13.0)
+# 11.5% prevalence estimate (9.8-13.4)
 
 #for Gambella
 ci.impt(RDT_reg[[5,3]], (RDT_reg[[2,3]]+RDT_reg[[5,3]]), PCR_overall[[1,2]], sum(PCR_overall$`n()`), conf = 0.95)
-# 1.2% prevalence estimate (0.7-2.1)
+# 1.1% prevalence estimate (0.6-2.0)
 
 #for Tigray
 ci.impt(RDT_reg[[6,3]], (RDT_reg[[3,3]]+RDT_reg[[6,3]]), PCR_overall[[1,2]], sum(PCR_overall$`n()`), conf = 0.95)
