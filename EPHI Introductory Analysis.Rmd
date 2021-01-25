@@ -1,0 +1,326 @@
+---
+title: "EPHI Introductory Analysis 1.15.20"
+output: html_notebook
+author: "J. Parr, E. Reichert"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+editor_options: 
+  chunk_output_type: inline
+---
+#Background#
+This is a collaborative project between EPHI, WHO, CDC, and UNC designed to assess the impact of *Plasmodium falciparum* parasites with deletions of the *pfhrp2* and/or *pfhrp3* (*pfhrp2/3*) genes.  Samples were collected from symptomatic adults and children presenting to government health facilities during 2017-2018.  Two rapid diagnostic tests (RDTs) were performed. Dried blood spots (DBS) were collected from a subset of subjects, with a focus on those with PfLDH+/PfHRP2- results on an SD Bioline RDT and PfHRP2- results on a CareStart RDT. Control samples were also collected from a subset of subjects presenting with PfHRP2+ results by RDT. 
+
+#Data cleaning#
+The first step is to merge the molecular and metadata (i.e., clinical and RDT data collected at health facility visit).
+
+**PCR DATA**: Among **1016 samples** that underwent DNA extraction and PCR, 75 entries were removed for having duplicate barcode numbers and region labels. This could be due to sample label issues or data entry errors. For now, we removed duplicates for this analysis, as well as samples where multiple DBS were received with same barcode and region label. This leaves **926 unique samples with PCR data**.
+
+**META-DATA**: The entire metadata set contains **12,572 subjects** screened. 
+
+**MERGED DATA (PCR and meta-data)**:  This left **820 unique samples** with matching Barcode Numbers and Region labels.
+
+**LUMINEX DATA**: 569 samples with antigenemia quantified by Luminex were received from the CDC. Samples with duplicate barcodes were removed, leaving 553 unique samples. Next, Luminex data was merged with the cleaned and merged PCR and meta-data set. Including both initial pilot samples (n = 67) and those from the CDC, Luminex data was successfully merged by barcode number for **456 unique samples**.
+
+
+```{r, include = FALSE}
+#IMPORT necessary libraries
+library(readr)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(stringr)
+library(tableone)
+library(RColorBrewer)
+library(cowplot)
+library(psych)
+library(EnvStats)
+library(binom)
+
+df_full <- read_csv("Full_PCR_Clinical_clean.csv") %>%
+  filter(!is.na(participant_ID))
+meta <- read_csv("Meta_full_clean.csv")
+```
+
+#Initial Results#
+
+There are `r nrow(df_full)` samples in the merged and cleaned PCR and metadata dataset.
+
+##PCR assays##
+
+1) We first performed *pfldh* qPCR on all samples in duplicate to determine the parasitemia.  Median and mean parasite densities for PCR+ samples (pfldh+) are listed below.
+
+
+```{r, echo = FALSE}
+#filter for those pfldh+ by qPCR
+df_ldh_sub <- subset(df_full, df_full$pfldh_pcr_pos == 1)
+summary(df_ldh_sub$pfldh_pcr_parasitemia_mean)
+
+#count no. of pfldh+ and their geoMean parasitemia
+nrow(df_ldh_sub)
+geoMean(df_ldh_sub$pfldh_pcr_parasitemia_mean, na.rm = T)
+
+#proportion of those pfldh+ and 95% CI, use prop.test method
+binom.confint(nrow(df_ldh_sub), nrow(df_full))
+```
+
+```{r pfldh_pcr, echo=FALSE, message=FALSE, warning=FALSE}
+#view proportion pfldh+ by region
+vars = c("pfldh_detection")
+strata = c("Reg")
+
+CreateTableOne(data = df_full, vars = vars, smd = TRUE, test = FALSE)
+CreateTableOne(data = df_full, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+```
+
+2) To avoid the risk of misclassification due to DNA concentrations beneath the limits of detection of the *pfhrp2/3* PCR assays, we restricted further analysis to samples with >100 parasites/uL, as demonstrated by the vertical line below, unless otherwise stated.
+
+This leaves **610/820 samples**.
+
+```{r, echo = FALSE}
+#Histogram of parasitemia among PCR dataset
+
+pdf(file = "parasite_histogram.pdf", width = 7.1, height = 5.9)
+#jpeg(filename = "parasite_histogram.jpg", units="mm", width = 100, height = 80, res=200)
+histo_breaks <- c(0, 10, 100, 1000, 10000, 100000, 1000000)
+histo_labs <- c('0', 10, 100, 1000, '10^4', '10^5', '10^6')
+
+ggplot(df_ldh_sub, aes(pfldh_pcr_parasitemia_mean)) +
+  geom_histogram(fill="orange", bins = 25) +
+  scale_x_log10(breaks = histo_breaks, labels = histo_labs) +
+  geom_segment(aes(x=100, xend=100, y=0, yend=80)) +
+  xlab("Parasites/uL by qPCR") +ylab("Count")+
+  theme_hc()
+
+df <- subset(df_full, pfldh_pcr_parasitemia_mean > 100)
+dev.off()
+```
+
+3) Next, we performed PCR assays targeting exon 2 of *pfhrp2* and *pfhrp3* in duplicate. Workflow and reactions were performed as previously described (Parr *et al.* Malar J 2018) except that PCR assays were single-step, 45-cycle, and used 10uL template reactions and AmpliTaq Gold 360 master mix. Primers are the outer, exon 2 oligos designed by Baker/Cheng (see Cheng Q et al. *Malar J* 2014 and Baker J et al. *J Infect Dis* 2005). 
+
+4) Finally, we performed an additional single-copy gene, real-time PCR assay targeting Pf-Btubulin to confirm that sufficient parasite DNA remained in samples with a negative *pfhrp2/3* PCR result.
+
+5) We made *pfhrp2/3* genotyping calls as outlined below. This approach was based on the method that yielded the best concordance between PCR and Luminex calls tested at UNC and the CDC: a) *pfldh* qPCR parasitemia >100p/uL (*chose a higher cutoff here due to purposeful increased LOD of downstream pfhrp2/3 assays*), b) distinct bands with expected fragment length (*600-1000bp*), c) both replicates negative to classify as deletion.
+
+
+##Characteristics of subjects##
+Basic demographics and RDT results of study subjects. Reminder that two RDTs were employed:
+- CareStart (PfHRP2/PvLDH)
+- SD (PfHRP2/PfLDH)
+
+I have created a new variable to let us have a look at **combined RDT results** results. 
+1) Deletion likely: PfHRP2- on CareStart and SD, PfLDH+ on the SD product
+
+2) Deletion possible: PfHRP2- on CareStart and SD, PfLDH- on the SD product
+
+3) Deletion unlikely: PfHRP2+ on CareStart and SD
+
+4) Inconclusive: 1 PfHRP2+, 1 PfHRP2- band
+
+I also created a variable that describes **any Pf+ RDT result (PfHRP2+ and/or PfpLDH+ on any RDT).**
+
+Basic Demographic and RDT data for **all subjects with metadata (n = `r nrow(meta)`)**:
+
+```{r demo, echo=FALSE, message=FALSE, warning=FALSE}
+meta$Sex[meta$Sex == "MALE"] <- "Male"
+meta$Location[meta$Location == "Mixed of Pf and Pv"] <- NA
+meta$Location[meta$Location == "rural"] <- "Rural"
+
+strata <- c("Reg")
+vars <- c("District", "Location", "Age", "Sex", "Fever", "rdt_discordant_f", "rdt_pf_pos_f")
+
+CreateTableOne(data = meta, vars = vars, smd = TRUE, test = FALSE)
+
+CreateTableOne(data = meta, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+```
+```{r}
+#explore RDT results by REG
+meta %>% group_by(rdt_discordant_f) %>% summarise(n())
+
+#RDT results by REG among Pf positives
+pf_pos <- meta %>% filter(rdt_pf_pos == 1)
+nrow(pf_pos)
+
+pf_pos %>% group_by(Reg, rdt_discordant_f) %>% summarise(n())
+
+pf_pos %>% group_by(Reg) %>% summarise(n(), Discordants = sum(rdt_discordant == 2, na.rm = T))
+
+#RDT results by District among Pf positives
+pf_pos %>% group_by(District) %>% summarise(Pf_pos = n())
+
+View(pf_pos %>% group_by(District, rdt_discordant_f) %>% summarise(n()))
+```
+
+
+Now focusing only on subjects with **both PCR and meta-data available (n = `r nrow(df_full)`)**.
+
+```{r}
+strata <- c("Reg") #("reg", "district")
+vars <- c("District", "Location", "Age", "Sex", "Fever","rdt_discordant_f", "rdt_pf_pos_f")
+
+CreateTableOne(data = df_full, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+```
+
+```{r}
+CreateTableOne(data = df_full, vars = c("carestart", "sd"), smd = TRUE, test = FALSE)
+```
+
+```{r}
+strata <- c("Reg") #("reg", "district")
+vars <- c("rdt_discordant_f")
+
+CreateTableOne(data = df_full, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+```
+
+##PCR results## 
+
+Now let's have a look at the PCR results, being mindful of the denominators as noted below.
+
+
+###Denominator: PCR-tested samples with >100 p/uL (n = 610)### 
+Overall results with percentages calculated from all samples that underwent *pfhrp2/3* PCR and had meta-data and restricted only to those with >100 p/uL by qPCR.
+
+```{r hrp23, echo=FALSE, message=FALSE, warning=FALSE}
+strata <- c("Reg") #("reg", "district")
+
+CreateTableOne(data = df, vars = "hrp23_status_f", smd = TRUE, test = FALSE)
+
+CreateTableOne(data = df, vars = "hrp23_status_f", strata = strata, smd = TRUE, test = FALSE)
+```
+
+Now looking at the PCR results by **individual RDT results**. 
+
+```{r hrp23_rdt, echo=FALSE, message=FALSE, warning=FALSE}
+strata <- c("hrp23_status_f") #("reg", "district")
+vars <- c("carestart", "sd")
+
+CreateTableOne(data = df, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+```
+
+Now looking at the **combined RDT results** results (see profiles above). Presenting the data in two different formats.
+
+```{r hrp23_rdt_comb, echo=FALSE, message=FALSE, warning=FALSE}
+strata <- c("hrp23_status_f")
+vars <- c("rdt_discordant_f")
+
+CreateTableOne(data = df, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+
+CreateTableOne(data = df, vars = strata, strata = vars, smd = TRUE, test = FALSE)
+```
+
+```{r}
+#Calculate Cohen's Kappa to evaluate concordance between RDT and PCR pfhrp2 call
+pcr_rdt <- df %>% select(hrp2_neg_final_f, rdt_discordant_f) %>%
+  mutate(pcr_deletion = ifelse(hrp2_neg_final_f == 'pfhrp2-',1,0)) %>%
+  mutate(rdt_deletion = ifelse(rdt_discordant_f == "2 HRP2-, 1 PfLDH+ bands",1,0))
+
+cohen_pcr_rdt <- pcr_rdt %>% group_by(pcr_deletion, rdt_deletion) %>% summarise(n())
+N <- sum(cohen_pcr_rdt$`n()`)
+
+cohen <- matrix(c(
+cohen_pcr_rdt[[1,3]]/N, cohen_pcr_rdt[[2,3]]/N,
+cohen_pcr_rdt[[3,3]]/N, cohen_pcr_rdt[[4,3]]/N),ncol=2,byrow=TRUE)
+
+cohen.kappa(cohen,n.obs=N)
+```
+
+Sex by PCR Result:
+
+```{r}
+strata <- c("hrp23_status_f")
+vars <- c("Sex")
+
+CreateTableOne(data = df, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+```
+
+Age by PCR Result:
+
+```{r}
+strata <- c("hrp23_status_f")
+vars <- c("Age")
+
+CreateTableOne(data = df, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+```
+
+Parasitemia by PCR Result:
+
+```{r}
+strata <- c("hrp23_status_f")
+vars <- c("pfldh_pcr_parasitemia_mean")
+
+CreateTableOne(data = df, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+
+# Compute the analysis of variance
+res.aov <- aov(log10(pfldh_pcr_parasitemia_mean) ~ hrp23_status_f, data = df)
+# Summary of the analysis
+summary(res.aov)
+```
+
+
+###Denominator: Discordant RDT samples only (n= `r sum(df$rdt_discordant == 2, na.rm = TRUE)`)### 
+Focusing in on these samples (PfHRP2- by SD and CareStart, PfLDH+ by SD) by region.
+
+```{r hrp23_rdt_more, echo=FALSE, message=FALSE, warning=FALSE}
+df_disc <- df[df$rdt_discordant==2 & !is.na(df$rdt_discordant),]
+
+strata <- c("Reg")
+vars <- c("hrp23_status_f", "District", "Location", "Age", "Sex", "Fever")
+
+CreateTableOne(data = df_disc, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+```
+
+##Luminex results##
+
+**456 samples** with Luminex data merged succesfully with our cleaned PCR + clinical dataset.
+
+HRP2 Positivity (mean proportion (SD)) by RDT Profile:
+
+```{r, echo = F}
+vars <- c("HRP2_Pos") 
+strata <- c("rdt_discordant_f")
+
+CreateTableOne(data = df_full, vars = as.character(vars), strata = strata, smd = TRUE, test = FALSE)
+```
+
+HRP2 Positivity (mean proportion (SD)) by PCR Profile:
+
+```{r, echo = F}
+vars <- c("HRP2_Pos") 
+strata <- c("hrp23_status_f")
+
+CreateTableOne(data = df_full, vars = as.character(vars), strata = strata, smd = TRUE, test = FALSE)
+```
+
+Visualization of HRP2 concentration (pg/mL) by PCR Profile:
+
+```{r, echo = F, message=F, warning=F}
+library(tidyverse)
+library(hrbrthemes)
+library(viridis)
+
+df_luminex <- subset(df_full, !is.na(`HRP2 (pg/mL)`) & !is.na(hrp23_status_f))
+
+df_luminex %>%
+  ggplot(aes(x=hrp23_status_f, y= log10(`HRP2 (pg/mL)`), fill=hrp23_status_f)) +
+    geom_boxplot() +
+    scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+    geom_jitter(color="black", size=0.4, alpha=0.9) +
+    theme(
+      legend.position="none") +
+    xlab("") + scale_y_continuous(breaks=c(1,2,3,4,5,6), labels=c(10^1, 10^2, 10^3, 10^4, 10^5, 10^6)) + ylab("HRP2 pg/ml") + ggtitle("HRP2 (pg/ml) by PCR Profile")
+```
+
+
+#Initial Conclusions#
+
+1) **False-negative RDT results due to *pfhrp2-/3-* parasites are common in Ethiopia.** 
+
+2) Among all Pf+ RDT results (PfHRP2+ and/or PfpLDH+), 13.1% of Pf+ RDTs were only positive on the PfpLDH band.
+
+3) **65% of samples with the discordant RDT profile of interest (PfHRP2- on both, PfLDH+ on SD) and PCR data available were *pfhrp2-/3-* **.
+
+4) The majority of all tested samples with PCR and metadata (n = `r nrow(df_full)`) came from Amhara (n=524), followed by Tigray (n=225) and Gambella (n=71).  The smallest percentage of discordant RDT profiles appeared in Gambella. **Amhara and Tigray are closer to the Ethiopia-Eritrea border**.
+
+5) The RDT profiles and PCR profiles are logical, albeit not perfect.
+
+
+
