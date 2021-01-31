@@ -1,0 +1,205 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+E Reichert
+July 2020
+
+This script reads in molecular-inversion probe (MIP) sequencing data sample by sample and generates a rectangle plot visualization of the MIPs data to scale along chr8 and chr13 (regions along the chromosome not targeted by a probe are shown in gray). Coverage at each MIP target is displayed as a dichotomous indicator of whether any coverage was achieved (orange = yes, blue = no). These visualizations are used to generate the WGS/MIP comparison figure in our manuscript Feleke et al.
+
+**NOTE**: To visualize another sample, simply Control+F and replace all occurrences of the current sample name with the one you wish to visualize.
+
+```{r}
+library(readr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+#read in MIPS coverage data
+chr8 <- read_csv("MIPS_clean_chr8.csv")
+chr13 <- read_csv("MIPS_clean_chr13.csv")
+
+#read in dataset of each MIP probes start, end, and mean location on chr8
+chr8_probes <- read_csv("MIP Probe Locations_CHR8.csv")
+chr13_probes <- read_csv("MIP Probe Locations_CHR13.csv")
+```
+
+## Chromosome 8 ##
+
+```{r}
+#data formatting
+chr8_probes <- t(chr8_probes)
+rownames(chr8_probes) <- c()
+colnames(chr8_probes) <- c("Start", "End", "Gene")
+chr8_probes <- chr8_probes[c(2:nrow(chr8_probes)),]
+chr8_probes <- as.data.frame(chr8_probes)
+
+chr8_probes <- data.frame(lapply(chr8_probes, as.character), stringsAsFactors=FALSE)
+chr8_probes <- data.frame(lapply(chr8_probes, as.numeric), stringsAsFactors=FALSE)
+
+chr8_probes$Gene <- round(chr8_probes$Gene, 0)
+```
+
+```{r}
+#reshape MIPS coverage data into long format
+chr8.long <- gather(data = chr8, key = Gene, value = Coverage, -lab_ID, -participant_ID, -Reg, factor_key = T)
+
+chr13.long <- gather(data = chr13, key = Gene, value = Coverage, -lab_ID, -participant_ID, -Reg, factor_key = T)
+
+#resassign 0 coverage to 0.1 for log10 scaling
+chr8.long$Coverage[chr8.long$Coverage == 0] <- 0.1
+chr8.long$Coverage <- as.numeric(chr8.long$Coverage)
+chr8.long$log10_coverage <- log10(chr8.long$Coverage)
+
+chr13.long$Coverage[chr13.long$Coverage == 0] <- 0.1
+chr13.long$Coverage <- as.numeric(chr13.long$Coverage)
+chr13.long$log10_coverage <- log10(chr13.long$Coverage)
+```
+
+
+```{r}
+#filter to sample we want to visualize
+mipHB3 <- subset(chr8.long, lab_ID == "HB3")
+mipHB3 <- mipHB3 %>% select(lab_ID, Gene, log10_coverage)
+
+mipHB3$Gene <- as.character(mipHB3$Gene)
+
+mipHB3$Gene[mipHB3$Gene == "HRP2_1"] <- 1374360
+mipHB3$Gene[mipHB3$Gene == "HRP2_2"] <- 1374409
+mipHB3$Gene[mipHB3$Gene == "HRP2_3"] <- 1374528
+mipHB3$Gene[mipHB3$Gene == "HRP2_4"] <- 1374564
+mipHB3$Gene[mipHB3$Gene == "HRP2_5"] <- 1374712
+mipHB3$Gene[mipHB3$Gene == "HRP2_6"] <- 1374726
+mipHB3$Gene[mipHB3$Gene == "HRP2_7"] <- 1374874
+mipHB3$Gene[mipHB3$Gene == "HRP2_8"] <- 1374959
+
+mipHB3$Gene <- as.numeric(mipHB3$Gene)
+
+mipHB3 <- left_join(mipHB3, chr8_probes, by = "Gene")
+
+mipHB3$positive <- c(rep('No', nrow(mipHB3)))
+mipHB3$positive[mipHB3$log10_coverage > -1] <- 'Yes'
+mipHB3$ylim <- c(rep(0, nrow(mipHB3)))
+mipHB3$ymax <- c(rep(0.1, nrow(mipHB3)))
+```
+
+```{r}
+#pdf(file = "mipHB3.pdf", width = 11, height = 1)
+ggplot() + 
+geom_rect(data=mipHB3, mapping=aes(xmin=Start, xmax=End, ymin= ylim, ymax=ymax, fill=positive)) + ylab('') + xlab('Chromosome 8 Position') +
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(size = 5, angle = 90),
+        panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+        legend.position = 'none') + 
+  scale_fill_manual(values = c("blue4","orange")) + scale_x_continuous(limits = c(1326000, 1420600), breaks = c(seq(1345000, 1402000, 2000))) + labs(fill = "MIP Positive")
+ 
+#dev.off()
+```
+
+## Chromosome 13 ##
+
+```{r}
+#data formatting
+chr13_probes <- t(chr13_probes)
+rownames(chr13_probes) <- c()
+colnames(chr13_probes) <- c("Start", "End", "Gene")
+chr13_probes <- chr13_probes[c(2:nrow(chr13_probes)),]
+chr13_probes <- as.data.frame(chr13_probes)
+
+chr13_probes <- data.frame(lapply(chr13_probes, as.character), stringsAsFactors=FALSE)
+chr13_probes <- data.frame(lapply(chr13_probes, as.numeric), stringsAsFactors=FALSE)
+
+chr13_probes$Gene <- round(chr13_probes$Gene, 0)
+```
+
+```{r}
+mipHB3 <- subset(chr13.long, lab_ID == "HB3")
+mipHB3 <- mipHB3 %>% select(lab_ID, Gene, log10_coverage)
+
+mipHB3$Gene <- as.character(mipHB3$Gene)
+
+mipHB3$Gene[mipHB3$Gene == "HRP3_1"] <- 2840751
+mipHB3$Gene[mipHB3$Gene == "HRP3_2"] <- 2840852
+mipHB3$Gene[mipHB3$Gene == "HRP3_3"] <- 2840904
+mipHB3$Gene[mipHB3$Gene == "HRP3_4"] <- 2841107
+mipHB3$Gene[mipHB3$Gene == "HRP3_5"] <- 2841240
+mipHB3$Gene[mipHB3$Gene == "HRP3_6"] <- 2841341
+mipHB3$Gene[mipHB3$Gene == "HRP3_7"] <- 2841528
+mipHB3$Gene[mipHB3$Gene == "HRP3_8"] <- 2841558
+mipHB3$Gene[mipHB3$Gene == "HRP3_9"] <- 2841762
+
+mipHB3$Gene <- as.numeric(mipHB3$Gene)
+
+mipHB3 <- left_join(mipHB3, chr13_probes, by = "Gene")
+
+mipHB3$positive <- c(rep(0, nrow(mipHB3)))
+mipHB3$positive[mipHB3$log10_coverage > -1] <- 1
+mipHB3$ylim <- c(rep(0, nrow(mipHB3)))
+mipHB3$ymax <- c(rep(0.1, nrow(mipHB3)))
+```
+
+```{r}
+#pdf(file = "mipHB3_hrp3.pdf", width = 10, height = 0.8)
+ggplot() + 
+geom_rect(data=mipHB3, mapping=aes(xmin=Start, xmax=End, ymin= ylim, ymax=ymax, fill=factor(positive))) + ylab('') + 
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(size = 5, angle = 90),
+        panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+        legend.position = "none") + 
+  scale_fill_manual(values = c("blue4", "orange")) + scale_x_continuous(limits = c(2776000, 2890000), breaks = c(seq(2774000, 2900000, 2000))) + labs(fill = "MIP Positive")
+#dev.off()
+```
+
+## Visualizations of Chr8/13 Gene Locations ##
+
+Generate a comparison figure of genic vs. non-genic regions along chr8/chr13, with genes displayed in black and non-genic regions in gray.
+
+```{r}
+#Read in gene data along chr8 for P. falciparum
+#downloaded from PlasmoDB
+chr8_genes <- read.delim("chr8__Genes.txt", header = TRUE, sep = "\t", dec = ".")
+chr8_genes <- chr8_genes %>% select(Start, End, Product.Description) %>% mutate(ylim = c(rep(0, nrow(.)))) %>% mutate(ymax = c(rep(0.1, nrow(.))))
+
+#pdf(file = "chr8_genes.pdf", width = 10, height = 1)
+ggplot() + 
+geom_rect(data=chr8_genes, mapping=aes(xmin=Start, xmax=End, ymin= ylim, ymax=ymax), fill = 'black') + ylab('') + xlab('Chromosome 8 Position') +
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(size = 5, angle = 90),
+        panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+        legend.position = 'none') + scale_x_continuous(breaks = c(seq(1325000, 1424000, 2000)))
+#dev.off()
+```
+
+```{r}
+#Read in gene data along chr13 for P. falciparum
+#downloaded from PlasmoDB
+
+chr13a_genes <- read.delim("chr13a__Genes.txt", header = TRUE, sep = "\t", dec = ".")
+chr13a_genes <- chr13a_genes %>% select(Start, End, Product.Description) %>% mutate(ylim = c(rep(0, nrow(.)))) %>% mutate(ymax = c(rep(0.1, nrow(.))))
+
+chr13a_genes <- chr13a_genes %>% filter(Start > 2770000 & Start < 2811076)
+
+chr13b_genes <- read.delim("chr13b_Genes.txt", header = TRUE, sep = "\t", dec = ".")
+chr13b_genes <- chr13b_genes %>% select(Start, End, Product.Description) %>% mutate(ylim = c(rep(0, nrow(.)))) %>% mutate(ymax = c(rep(0.1, nrow(.))))
+
+chr13_genes <- rbind(chr13a_genes, chr13b_genes)
+
+#pdf(file = "chr13_genes.pdf", width = 10, height = 1)
+ggplot() + 
+geom_rect(data=chr13_genes, mapping=aes(xmin=Start, xmax=End, ymin= ylim, ymax=ymax), fill = 'black') + ylab('') + xlab('Chromosome 13 Position') +
+  theme(axis.text.y = element_blank(),
+        axis.text.x = element_text(size = 5, angle = 90),
+        panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+        legend.position = 'none') + scale_x_continuous(limits = c(2770000, 2893000), breaks = c(seq(2770000, 2890000, 2000)))
+#dev.off()
+```
+

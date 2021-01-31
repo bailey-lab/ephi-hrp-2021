@@ -1,0 +1,497 @@
+---
+title: "HRP2/3 MIP Sequencing Analysis"
+output: html_notebook
+author: "E Reichert"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+
+---
+
+*Background*
+
+This script reads in and visualizes the Chr8/13 MIP sequencing data from Ozkan Aydemir for a subset of EPHI PCR samples. MIPs Results are then compared to PCR and clinical data.
+
+July 2020
+
+```{r, include = F}
+#Load necessary packages
+library(tidyr)
+library(ggplot2)
+library(reshape2)
+library(plyr)
+library(viridis)
+library(hrbrthemes)
+library(readxl)
+library(stringr)
+library(dplyr)
+library(readr)
+library(plotly)
+library(tableone)
+library(forcats)
+library(knitr)
+library(tidyverse)
+library(ggthemes)
+library(ggsignif)
+library(gdata)
+library(data.table)
+library(gridExtra)
+library(epiR)
+library(psych)
+library(kableExtra)
+```
+
+```{r}
+chr8 <- read_csv("MIPS_clean_chr8.csv")
+chr13 <- read_csv("MIPS_clean_chr13.csv")
+mip_calls <- read_csv("MIP Calls.csv") %>%
+  select(-"Reg", -"participant_ID")
+
+df_full <- read_csv("Full_PCR_Clinical_clean.csv") %>%
+  select(-"X1")
+```
+
+*I. CHR8 (pfhrp2) MIP Results*
+
+```{r}
+#Create final dataset of MIPs Calls and PCR/clinical data
+mips_all <- merge(x=mip_calls, y=df_full, by=c("lab_ID")) %>% distinct()
+```
+
+*Note:* There are 367 samples in mips_all (MIPS and PCR data)
+
+```{r}
+#Create histogram of pfldh concentration (parasitemia) for samples with successful MIP calls
+pcr_mips <- left_join(df_full, mip_calls, by = c("lab_ID")) %>%
+  mutate(mips_call = ifelse(!is.na(`c8-cluster-number`),1,0))
+
+#pdf(file = "mip_histogram.pdf", width = 6.8, height = 5)
+#jpeg(filename = "mip_histogram.jpg", units="mm", width = 150, height = 100, res=200)
+
+p <- pcr_mips %>%
+  ggplot( aes(x= log10(pfldh_pcr_parasitemia_mean), fill= factor(mips_call), color = factor(mips_call))) +
+    geom_histogram(alpha=0.6, position = 'identity') +
+    theme_classic() + 
+    labs(fill="Successful MIP \nCall", color = "Successful MIP \nCall")
+p + scale_fill_manual(values = c("orange", "deeppink3"), breaks = c(0,1), labels = c("No","Yes")) + scale_color_manual(values = c("orange", "deeppink3"),labels = c("No","Yes")) + theme_classic() + xlab("Parasites/uL by qPCR") + scale_x_continuous(breaks=c(seq(1,5)), labels=c(10^seq(1,3), '10^4', '10^5')) + geom_vline(xintercept = log10(925), col = "black", linetype = "dashed")
+
+#dev.off()
+```
+
+```{r}
+#determine optimal parasite density threshold for MIP success
+#Note: this is specific to our project and sequencing effort
+library(cutpointr)
+cp1 <- cutpointr(pcr_mips, pfldh_pcr_parasitemia_mean, mips_call, na.rm = TRUE, 
+                method = maximize_metric, metric = youden)
+cp1
+```
+
+Now output various summary statistics of the *mips_all* chr8 dataset.
+
+```{r}
+#fix typos in location data
+mips_all$Location[mips_all$Location == "rural"] <- "Rural"
+mips_all$District[mips_all$District == "QUARA"] <- "Quara"
+
+#Summary stats by Region
+strata <- c("Reg") 
+vars <- c("District", "Location", "Age", "Sex", "Fever","rdt_discordant_f", "rdt_pf_pos_f")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+```
+
+#### Figure 1. Chromosome 8 MIP Deep Sequencing by Deletion Profile
+Create initial visualization of the data.
+
+*CT = Controls*
+
+*MIPs Heatmap (CHR8)*
+
+```{r}
+#Create heatmap of MIPs data
+mip_calls$lab_ID <- as.numeric(mip_calls$lab_ID)
+chr8$lab_ID <- as.numeric(chr8$lab_ID)
+
+#Make dataset of full MIPs data
+chr8_heatmap <- left_join(chr8, mip_calls, by = c("lab_ID")) %>% 
+  select(-"hrp2-call", -"c8-cluster", -"c8-color", -"hrp3-call", -"c13-cluster", -"c13-cluster-number", -"c13-color", -"hrp3-del") %>% 
+  filter(!is.na(`c8-cluster-number`))
+
+#space out gene location labels
+breaks <- colnames(chr8)
+breaks <- breaks[4:97]
+breaks <- breaks[c(seq(2,64,2), 66:73, seq(75,94,2))]
+```
+
+
+```{r}
+pdf(file = "hrp2_mip.pdf", width = 10, height = 4)
+#tiff(filename = "hrp2_mip.tiff", units="in", width = 10, height = 4, res=300, compression="lzw")
+
+#order dataset for visualization
+chr8_heatmap <- chr8_heatmap %>% arrange(-`c8-cluster-number`, HRP2_mean)
+chr8_heatmap <- chr8_heatmap[!duplicated(chr8_heatmap$lab_ID),]
+chr8_heatmap$lab_ID <- as.character(chr8_heatmap$lab_ID)
+chr8_heatmap$lab_ID <- fct_inorder(chr8_heatmap$lab_ID)
+
+#reshape into long format
+chr8.long2 <- gather(data = chr8_heatmap, key = Gene, value = Coverage, -lab_ID, -participant_ID, -Reg, -HRP2_mean, -`c8-cluster-number`, -`hrp2-del`, factor_key = T)
+
+chr8.long2$Coverage[chr8.long2$Coverage == 0] <- 0.1
+chr8.long2$Coverage <- as.numeric(chr8.long2$Coverage)
+chr8.long2$log10_coverage <- log10(chr8.long2$Coverage)
+chr8.long2$`hrp2-del` <- as.factor(chr8.long2$`hrp2-del`)
+
+#Specify figure labels for chr8 MIP structural profiles
+mip.labs <- c("chr8-P1", "P2", "P3", "P4")
+names(mip.labs) <- c("1", "2", "3", "4")
+
+#produce heatmap
+p <- ggplot(chr8.long2, aes(x = Gene, y = lab_ID, fill= log10_coverage)) + 
+  geom_tile()+
+  scale_fill_viridis(discrete=FALSE, option = "plasma") + scale_color_viridis(discrete=FALSE, option = "plasma") +
+  theme(axis.text.x = element_text(size = 5, angle = 90), axis.text.y = element_text(size = 5)) + scale_x_discrete(position = "top", breaks = breaks) + facet_grid(`c8-cluster-number`~.,scales="free_y",space="free", labeller = labeller(`c8-cluster-number` = mip.labs)) +
+  theme(strip.background =element_rect(fill="orange"), axis.text.y = element_blank()) + ylab("Sample") + xlab("Chromosome 8 Position") + labs(fill = "Log10 Coverage", color = "Coverage (log10)")
+p
+
+dev.off()
+```
+
+
+
+#### Table 1. PCR, RDT, and Luminex Results by MIP HRP2 Deletion Call
+
+```{r, echo = F}
+mips_all$HRP2_pos_f[mips_all$`hrp2-del`== 0] <- "HRP2+"
+mips_all$HRP2_pos_f[mips_all$`hrp2-del` == 1] <- "HRP2-"
+mips_all$hrp2_neg_final_f <- as.character(mips_all$hrp2_neg_final_f)
+
+mips_all$Luminex[mips_all$HRP2_Pos == 1] <- "HRP2+"
+mips_all$Luminex[mips_all$HRP2_Pos == 0] <- "HRP2-"
+
+colnames(mips_all)[colnames(mips_all) == "hrp2_neg_final_f"] <- "PCR HRP2"
+
+vars <- c("PCR HRP2", "rdt_discordant_f", "Luminex")
+strata <- c("HRP2_pos_f")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = FALSE)
+```
+
+```{r}
+#Cohen's kappa for concordance of PCR and MIPs results
+pcr_rdt <- mips_all %>% group_by(HRP2_pos_f, `PCR HRP2`) %>% summarise(n())
+N <- pcr_rdt[[6,3]] + pcr_rdt[[5,3]] + pcr_rdt[[2,3]] + pcr_rdt[[1,3]]
+
+pcr_rdt_cohen <- matrix(c(
+pcr_rdt[[6,3]]/N, pcr_rdt[[5,3]]/N,
+pcr_rdt[[2,3]]/N, pcr_rdt[[1,3]]/N),ncol=2,byrow=TRUE)
+
+cohen.kappa(pcr_rdt_cohen,n.obs=N)
+```
+
+
+#### Table 2. HRP2 MIP Deletion Profile by Region (and District)
+
+*Note*: All p-values reflect the results of a Chi-Square test for independence.
+
+```{r, echo = F}
+mips_all$`c8-cluster-number` <- as.character(mips_all$`c8-cluster-number`)
+vars <- c("c8-cluster-number")
+strata <- c("Reg")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = T)
+```
+
+```{r}
+vars <- c("c8-cluster-number")
+strata <- c("District")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = T)
+```
+
+#### Table 3. HRP2 MIP Deletion Profile by Febrile Status
+
+```{r, echo = F}
+vars <- c("c8-cluster-number")
+strata <- c("Fever")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+```
+
+#### Table 4. HRP2 MIP Deletion Profile by Severity (No. of Symptoms)
+
+```{r, echo = F}
+#create numerical indicators for 6 symptoms assessed
+mips_all <- mutate(mips_all, 
+            fever_num = if_else(Fever == "Yes", 1L, 0L),
+            headache_num = if_else(Headache == "Yes", 1L , 0L),
+            jointpain_num = if_else(JointPain == "Yes", 1L , 0L),
+            feelingcold_num = if_else(FeelingCold == "Yes", 1L , 0L),
+            nausea_num = if_else(Nausea == "Yes", 1L , 0L),
+            appetite_num = if_else(Appetite == "Yes", 1L , 0L))
+#create var for overall no. of symptoms reported
+mips_all$symptoms <- mips_all$fever_num + mips_all$headache_num + mips_all$jointpain_num + mips_all$feelingcold_num + mips_all$nausea_num + mips_all$appetite_num
+
+strata <- c("c8-cluster-number")
+vars <- c("symptoms")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+
+anova_one_way <- aov(symptoms ~ `c8-cluster-number`, data = mips_all)
+summary(anova_one_way)
+```
+
+#### Figure 2. Disease Severity (No. of Symptoms) by HRP2 MIP Profile
+Create density plot for no. of symptoms by chr8 MIP structural profile
+
+```{r, echo = F}
+library(ggplot2)
+library(ggridges)
+
+addbreaks <- function(x) { lapply(strwrap(x, width = 10, simplify = FALSE), paste, collapse="\n")
+  }
+
+my_y_title <- expression(paste(italic("Pfhrp2"), " MIP Profile"))
+mylabels <- c("chr8-P1", "chr8-P2", "chr8-P3", "chr8-P4")
+
+hrp2_plot <- ggplot(subset(mips_all, !is.na(symptoms)), aes(x = as.numeric(symptoms), y = `c8-cluster-number`)) +
+  geom_density_ridges(aes(fill = `c8-cluster-number`), color = "white") + xlab("Number of Symptoms") + labs(fill = "HRP2 MIP Profile") + ylab(my_y_title)+
+    scale_fill_viridis(option = "magma", discrete=TRUE) +
+    scale_color_viridis(option = "magma", discrete=TRUE)+ scale_x_continuous(breaks=c(0,3,6), labels=c(0,3,6)) + guides(fill=FALSE) + ggtitle("A.") + scale_y_discrete(labels = addbreaks(mylabels))
+hrp2_plot
+
+```
+
+#### Table 5. Cases Presenting Symptom (%) by HRP2 MIP Profile
+
+```{r, echo = F, message = F}
+#look at each symptom independently by chr8 MIP profile
+hrp2_symptoms <- mips_all %>%
+  group_by("HRP2 Profile" = `c8-cluster-number`) %>%
+  summarise(n = n(), fever = sum(fever_num, na.rm = T)/n()*100, headache = sum(headache_num, na.rm = T)/n()*100, jointpain = sum(jointpain_num, na.rm = T)/n()*100, cold = sum(feelingcold_num, na.rm = T)/n()*100, nausea = sum(nausea_num, na.rm = T)/n()*100, appetite = sum(appetite_num, na.rm = T)/n()*100)
+
+kable(hrp2_symptoms, digits = 2) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+*II. CHR13 (pfhrp3) MIP Results*
+
+
+There are **367 samples** from chromosome 13 data that match up with PCR data.
+
+#### Chromosome 13 MIP Sequencing by Deletion Profile
+Create visualization of the data
+
+*CT = Controls*
+
+*MIPs Heatmap (CHR13)*
+
+```{r}
+#generate full dataset of chr13 MIPs data
+chr13$lab_ID <- as.numeric(chr13$lab_ID)
+
+chr13_heatmap <- left_join(chr13, mip_calls, by = "lab_ID") %>% 
+  select(-"hrp2-call", -"c8-cluster", -"c8-cluster-number", -"c8-color", -"hrp3-call", -"c13-cluster", -"c13-color") %>%
+  filter(!is.na(`c13-cluster-number`))
+
+#space out gene location labels
+breaks <- colnames(chr13)
+breaks <- breaks[4:128]
+breaks <- breaks[c(seq(2,112,2), 114:119, seq(121,127,2))]
+```
+
+```{r}
+#pdf(file = "hrp3_mip.pdf", width = 10, height = 4)
+#tiff(filename = "hrp3_mip.tiff", units="in", width = 10, height = 4, res=300, compression="lzw")
+
+#order dataset for visualization
+chr13_heatmap <- chr13_heatmap %>% arrange(`c13-cluster-number`, HRP3_mean)
+chr13_heatmap <- chr13_heatmap[!duplicated(chr13_heatmap$lab_ID),]
+chr13_heatmap$lab_ID <- as.character(chr13_heatmap$lab_ID)
+chr13_heatmap$lab_ID <- fct_inorder(chr13_heatmap$lab_ID)
+
+#reshape data into long format
+chr13.long2 <- gather(data = chr13_heatmap, key = Gene, value = Coverage, -lab_ID, -participant_ID, -Reg, -HRP3_mean, -`c13-cluster-number`, -`hrp3-del`, factor_key = T)
+
+chr13.long2$Coverage[chr13.long2$Coverage == 0] <- 0.1
+
+chr13.long2$log10_coverage <- log10(chr13.long2$Coverage)
+
+#Create labels for chr13 MIP structural profiles
+mip.labs <- c("chr13-P1", "P2", "P3", "P4")
+names(mip.labs) <- c("1", "2", "3", "4")
+
+#produce heatmap
+p <- ggplot(chr13.long2, aes(x = Gene, y = lab_ID, fill= log10_coverage)) + 
+  geom_tile()+
+  scale_fill_viridis(discrete=FALSE, option = "plasma") +
+  theme(axis.text.x = element_text(size = 5, angle = 90), axis.text.y = element_text(size = 5)) + scale_x_discrete(position = "top", breaks = breaks) + facet_grid(`c13-cluster-number`~.,scales="free_y",space="free_y", labeller = labeller(`c13-cluster-number` = mip.labs)) +
+  theme(strip.background =element_rect(fill="orange"), axis.text.y = element_blank()) + ylab("Sample") + xlab("Chromosome 13 Position")+ labs(fill = "Log10 Coverage")
+p
+#dev.off()
+
+#use grid package to make chr13-P2 (with only n = 1) visible in heatmap
+pdf(file="hrp3_mip.pdf", onefile=FALSE, width = 10, height = 4)
+library(grid)
+gt <- ggplot_gtable(ggplot_build(p))
+gt$heights[[9]] <- unit(16, "null")
+grid.newpage()
+grid.draw(gt)
+dev.off()
+```
+
+#### Table 6. PCR Results by MIP HRP3 Deletion Call
+
+```{r, echo = F}
+mips_all$hrp3_pos_f[mips_all$`hrp3-del` == 0] <- "hrp3+"
+mips_all$hrp3_pos_f[mips_all$`hrp3-del` > 0] <- "hrp3-"
+
+mips_all$hrp3_neg_final_f <- as.character(mips_all$hrp3_neg_final_f)
+colnames(mips_all)[colnames(mips_all) == "hrp3_neg_final_f"] <- "PCR HRP3"
+
+vars <- c("PCR HRP3")
+strata <- c("hrp3_pos_f")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = F)
+```
+
+```{r}
+#Cohen's kappa for pfhrp3 PCR/MIP call concordance
+pcr_rdt <- mips_all %>% group_by(hrp3_pos_f, `PCR HRP3`) %>% summarise(n())
+N <- pcr_rdt[[6,3]] + pcr_rdt[[5,3]] + pcr_rdt[[2,3]] + pcr_rdt[[1,3]]
+
+pcr_rdt <- matrix(c(
+pcr_rdt[[6,3]]/N, pcr_rdt[[5,3]]/N,
+pcr_rdt[[2,3]]/N, pcr_rdt[[1,3]]/N),ncol=2,byrow=TRUE)
+
+cohen.kappa(pcr_rdt,n.obs=N)
+```
+
+#### Table 7. HRP3 MIP Deletion Profile by Region (and District)
+
+```{r, echo = F}
+mips_all$`c13-cluster-number` <-
+  as.character(mips_all$`c13-cluster-number`)
+
+vars <- c("c13-cluster-number")
+strata <- c("Reg")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = T)
+```
+
+```{r}
+mips_all$District[mips_all$District == "QUARA"] <- "Quara"
+vars <- c("c13-cluster-number")
+strata <- c("District")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = T)
+```
+
+#### Table 8. HRP3 MIP Deletion Profile by Febrile Status
+
+```{r, echo = F}
+strata <- c("Fever")
+vars <- c("c13-cluster-number")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+```
+
+#### Table 9. HRP3 MIP Deletion Profile by Severity (No. of Symptoms)
+
+```{r, echo = F}
+#create numeric indicator for each symptom
+mips_all <- mutate(mips_all, 
+            fever_num = if_else(Fever == "Yes", 1L, 0L),
+            headache_num = if_else(Headache == "Yes", 1L , 0L),
+            jointpain_num = if_else(JointPain == "Yes", 1L , 0L),
+            feelingcold_num = if_else(FeelingCold == "Yes", 1L , 0L),
+            nausea_num = if_else(Nausea == "Yes", 1L , 0L),
+            appetite_num = if_else(Appetite == "Yes", 1L , 0L))
+
+#create var for total no. of symptoms reported
+mips_all$symptoms <- mips_all$fever_num + mips_all$headache_num + mips_all$jointpain_num + mips_all$feelingcold_num + mips_all$nausea_num + mips_all$appetite_num
+
+strata <- c("c13-cluster-number")
+vars <- c("symptoms")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+
+anova_one_way <- aov(symptoms ~ `c13-cluster-number`, data = mips_all)
+summary(anova_one_way)
+```
+
+#### Figure 4. Disease Severity (No. of Symptoms) by HRP3 MIP Profile
+Density plot for no. of symptoms by chr13 MIP structural profile
+
+*Note*: chr13-P2 is excluded due to its sample size of n=1
+
+```{r, echo = F}
+mips_all$`c13-cluster-number` <-
+  as.character(mips_all$`c13-cluster-number`)
+
+my_y_title <- expression(paste(italic("Pfhrp3"), " MIP Profile"))
+addbreaks <- function(x) { lapply(strwrap(x, width = 10, simplify = FALSE), paste, collapse="\n")
+}
+mylabels = c("chr13-P1", "chr13-P3", "chr13-P4")
+
+hrp3_plot <- ggplot(mips_all, aes(x = as.numeric(symptoms), y = `c13-cluster-number`)) +
+  geom_density_ridges(aes(fill = `c13-cluster-number`), color = "white") +
+    scale_fill_viridis(option = "magma", discrete=TRUE) +
+    scale_color_viridis(option = "magma", discrete=TRUE) + xlab("Number of Symptoms") + labs(fill = "HRP3 MIP Profile") + ylab(my_y_title)+ scale_x_continuous(breaks=c(0,3,6), labels=c(0,3,6)) + ggtitle("B.") + guides(fill = F) + scale_y_discrete(labels = addbreaks(mylabels))
+hrp3_plot
+
+pdf(file = "symptom_densities.pdf", width = 4, height = 6)
+grid.arrange(hrp2_plot, hrp3_plot, nrow = 2)
+
+dev.off()
+```
+
+#### Table 10. Cases Presenting Symptom (%) by HRP3 MIP Profile
+
+```{r, echo = F}
+hrp3_symptoms <- mips_all %>%
+  group_by("HRP3 Profile" = `c13-cluster-number`) %>%
+  summarise(n = n(), fever = sum(fever_num, na.rm = T)/n()*100, headache = sum(headache_num, na.rm = T)/n()*100, jointpain = sum(jointpain_num, na.rm = T)/n()*100, cold = sum(feelingcold_num, na.rm = T)/n()*100, nausea = sum(nausea_num, na.rm = T)/n()*100, appetite = sum(appetite_num, na.rm = T)/n()*100)
+
+kable(hrp3_symptoms, digits = 2) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+*Combined Chr8/13 MIP Structural Profile Analysis*
+#### Table 11. chr8 MIP profile by chr13 MIP profile
+
+```{r, echo = F}
+strata <- c("c8-cluster-number")
+vars <- c("c13-cluster-number")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+```
+
+```{r}
+mips_all <- mips_all %>%
+  mutate(hrp23_mip_cat = paste(`c8-cluster-number`, ",", `c13-cluster-number`))
+
+vars <- c("hrp23_mip_cat")
+strata <- c("Reg")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+```
+```{r}
+mips_all$District[mips_all$District == "QUARA"] <- "Quara"
+
+vars <- c("hrp23_mip_cat")
+strata <- c("District")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+```
+
+#### Table 12. Combined HRP2/HRP3 MIP Deletion Profile by Severity (No. of Symptoms)
+
+```{r, echo = F}
+vars <- c("hrp23_mip_cat")
+strata <- c("symptoms")
+
+CreateTableOne(data = mips_all, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+```
+
+
+
