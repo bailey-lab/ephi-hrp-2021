@@ -223,6 +223,30 @@ cohen_pcr_rdt[[3,3]]/N, cohen_pcr_rdt[[4,3]]/N),ncol=2,byrow=TRUE)
 cohen.kappa(cohen,n.obs=N)
 ```
 
+**Barplot**
+Visualize the distribution of PCR pfhrp2/3 results by RDT for Pf Pos infections
+
+```{r}
+#filter for only pf-pos infections
+pf_pos <- df %>% filter(rdt_pf_pos == 1)
+pf_pos$rdt_discordant_f <- as.character(pf_pos$rdt_discordant_f)
+
+#prepare axis labels
+pf_pos$rdt_discordant_f[pf_pos$rdt_discordant_f == "2 HRP2+ bands"] <- "2 HRP2+"
+pf_pos$rdt_discordant_f[pf_pos$rdt_discordant_f == "2 HRP2-, 1 PfLDH+ bands"] <- "2 HRP2-, 1 PfLDH+"
+pf_pos$rdt_discordant_f[pf_pos$rdt_discordant_f == "1 HRP2+, 1HRP2- band"] <- "1 HRP2+, 1 HRP2-"
+pf_pos$rdt_discordant_f <- factor(pf_pos$rdt_discordant_f, levels = c("2 HRP2+","2 HRP2-, 1 PfLDH+","1 HRP2+, 1 HRP2-"))
+
+pf_pos <- pf_pos %>% mutate(hrp23_status_f = as.character(hrp23_status_f))
+pf_pos$hrp23_status_f[is.na(pf_pos$hrp23_status_f)] <- "Insufficient DNA"
+pf_pos$hrp23_status_f <- factor(pf_pos$hrp23_status_f, levels = c("pfhrp2+/3+","pfhrp2-/3-","pfhrp2-/3+", "pfhrp2+/3-", "Insufficient DNA"))
+
+plot1 <- ggplot(data = pf_pos, aes(x = rdt_discordant_f, fill = hrp23_status_f)) + 
+    geom_bar() + xlab("RDT Profile") + ylab("N") + labs(fill = "PCR result") + scale_fill_manual(values = c("lightsteelblue2", "firebrick3", "salmon", "sandybrown", "grey")) + theme_classic() + scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 9, simplify = FALSE), paste, collapse="\n")) + scale_y_continuous(expand = c(0, 0), limits = c(0,480))
+plot1
+```
+
+**Demographic covariates exploration**
 Sex by PCR Result:
 
 ```{r}
@@ -230,6 +254,9 @@ strata <- c("hrp23_status_f")
 vars <- c("Sex")
 
 CreateTableOne(data = df, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+
+test <- chisq.test(table(df$hrp23_status_f, df$Sex))
+test
 ```
 
 Age by PCR Result:
@@ -239,6 +266,9 @@ strata <- c("hrp23_status_f")
 vars <- c("Age")
 
 CreateTableOne(data = df, vars = vars, strata = strata, smd = TRUE, test = TRUE)
+
+res.aov <- aov(Age ~ hrp23_status_f, data = df)
+summary(res.aov)
 ```
 
 Parasitemia by PCR Result:
@@ -267,6 +297,39 @@ vars <- c("hrp23_status_f", "District", "Location", "Age", "Sex", "Fever")
 
 CreateTableOne(data = df_disc, vars = vars, strata = strata, smd = TRUE, test = FALSE)
 ```
+
+**Barplot**
+Just focused on discordant RDT flagged infections, look at distribution of pfhrp2/3 PCR result by region
+
+```{r}
+disc_region <- df_disc %>% group_by(Reg, hrp23_status_f) %>% summarise(n())
+
+#Discordant RDT profile broken down by Region, PCR result
+Reg <- c(rep('Amhara   ', 4),rep('Gambella   ',4),rep('Tigray   ',4))
+hrp23_status_f <- rep(c("pfhrp2+/3+","pfhrp2-/3-","pfhrp2-/3+", "pfhrp2+/3-"), 3)
+
+#pull out results from disc_region in desired order for figure
+n <- c(disc_region$`n()`[[4]], disc_region$`n()`[[1]], disc_region$`n()`[[2]], disc_region$`n()`[[3]], disc_region$`n()`[[6]], disc_region$`n()`[[5]],0,0, disc_region$`n()`[[10]], disc_region$`n()`[[7]], disc_region$`n()`[[8]], disc_region$`n()`[[9]])
+
+df2 <- data.frame(Reg, hrp23_status_f, n)
+
+df2$Reg <- factor(df2$Reg,levels = c("Amhara   ","Tigray   ","Gambella   "))
+df2$hrp23_status_f <- factor(df2$hrp23_status_f, levels = c("pfhrp2+/3+","pfhrp2-/3-","pfhrp2-/3+", "pfhrp2+/3-"))
+
+g <- ggplot(df2, aes(x = Reg, y = n))
+plot2 <- g +geom_bar(aes(fill = hrp23_status_f), stat = "identity") + xlab("Region") + ylab("Discordant RDT Profile (N)") + labs(fill = "PCR result") + scale_fill_manual(values = c("lightsteelblue2", "firebrick3", "salmon", "sandybrown")) + theme_classic() + scale_y_continuous(expand = c(0, 0), limits = c(0,115))+
+  scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 8, simplify = FALSE), paste, collapse="\n")) + theme(legend.position = 'none')
+plot2
+```
+
+Output both barplots together for final Supp. Figure
+
+```{r}
+#pdf(file = "EPHI_bar_graphs.pdf", width = 6, height = 4)
+plot_grid(plot1, plot2, labels = "AUTO", nrow = 1)
+#dev.off()
+```
+
 
 ##Luminex results##
 
@@ -309,18 +372,6 @@ df_luminex %>%
     xlab("") + scale_y_continuous(breaks=c(1,2,3,4,5,6), labels=c(10^1, 10^2, 10^3, 10^4, 10^5, 10^6)) + ylab("HRP2 pg/ml") + ggtitle("HRP2 (pg/ml) by PCR Profile")
 ```
 
-
-#Initial Conclusions#
-
-1) **False-negative RDT results due to *pfhrp2-/3-* parasites are common in Ethiopia.** 
-
-2) Among all Pf+ RDT results (PfHRP2+ and/or PfpLDH+), 13.1% of Pf+ RDTs were only positive on the PfpLDH band.
-
-3) **65% of samples with the discordant RDT profile of interest (PfHRP2- on both, PfLDH+ on SD) and PCR data available were *pfhrp2-/3-* **.
-
-4) The majority of all tested samples with PCR and metadata (n = `r nrow(df_full)`) came from Amhara (n=524), followed by Tigray (n=225) and Gambella (n=71).  The smallest percentage of discordant RDT profiles appeared in Gambella. **Amhara and Tigray are closer to the Ethiopia-Eritrea border**.
-
-5) The RDT profiles and PCR profiles are logical, albeit not perfect.
 
 
 
