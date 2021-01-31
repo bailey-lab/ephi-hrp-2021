@@ -8,3 +8,6 @@
 
 # User-specific files
 .Ruserdata
+
+# R project files
+.Rproj*
