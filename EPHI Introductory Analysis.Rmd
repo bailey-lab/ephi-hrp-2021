@@ -79,7 +79,7 @@ This leaves **610/820 samples**.
 ```{r, echo = FALSE}
 #Histogram of parasitemia among PCR dataset
 
-pdf(file = "parasite_histogram.pdf", width = 7.1, height = 5.9)
+#pdf(file = "parasite_histogram.pdf", width = 7.1, height = 5.9)
 #jpeg(filename = "parasite_histogram.jpg", units="mm", width = 100, height = 80, res=200)
 histo_breaks <- c(0, 10, 100, 1000, 10000, 100000, 1000000)
 histo_labs <- c('0', 10, 100, 1000, '10^4', '10^5', '10^6')
@@ -88,7 +88,7 @@ ggplot(df_ldh_sub, aes(pfldh_pcr_parasitemia_mean)) +
   geom_histogram(fill="orange", bins = 25) +
   scale_x_log10(breaks = histo_breaks, labels = histo_labs) +
   geom_segment(aes(x=100, xend=100, y=0, yend=80)) +
-  xlab("Parasites/uL by qPCR") +ylab("Count")+
+  xlab(expression("Parasites/"*mu*"L by qPCR")) +ylab("Count")+
   theme_hc()
 
 df <- subset(df_full, pfldh_pcr_parasitemia_mean > 100)
@@ -372,6 +372,37 @@ df_luminex %>%
     xlab("") + scale_y_continuous(breaks=c(1,2,3,4,5,6), labels=c(10^1, 10^2, 10^3, 10^4, 10^5, 10^6)) + ylab("HRP2 pg/ml") + ggtitle("HRP2 (pg/ml) by PCR Profile")
 ```
 
+Visualization of parasitemia (p/uL) by PCR Profile:
+
+```{r}
+#pdf(file = "pcr_histogram.pdf", width = 6.8, height = 7)
+jpeg(filename = "pcr_histogram.jpg", units="mm", width = 150, height = 160, res=200)
+
+#create dummy var for hrp2 del for figure plotting
+hrp2_sub <- df_full %>%
+  select(pfldh_pcr_parasitemia_mean, pfhrp2_pcr_pos) %>%
+  mutate(hrp2_del = ifelse(pfhrp2_pcr_pos == 0, 'Z', 'X'))
+
+#pfhrp2 (PCR) result by parasitemia
+p1 <- hrp2_sub %>%
+  ggplot( aes(x= log10(pfldh_pcr_parasitemia_mean), fill= factor(hrp2_del), color = factor(hrp2_del))) +
+    geom_histogram(alpha=0.8, position = 'identity') +
+    theme_classic() + 
+    labs(fill=expression(paste(italic("pfhrp2"), " PCR Result")), color = expression(paste(italic("pfhrp2"), " PCR Result")))
+p1 <- p1 + scale_fill_manual(values = c("skyblue", "midnightblue"), labels = c(expression(italic("pfhrp2+")),expression(italic("pfhrp2-")))) + scale_color_manual(values = c("skyblue", "midnightblue"), labels = c(expression(italic("pfhrp2+")),expression(italic("pfhrp2-")))) + theme_classic() + xlab(expression("Parasites/"*mu*"L by qPCR"))  + ylab("Count") + scale_x_continuous(breaks=c(seq(1,5)), labels=c(10^seq(1,3), '10^4', '10^5'))
+
+#pfhrp3 (PCR) result by parasitemia
+p2 <- df_full %>%
+  ggplot( aes(x= log10(pfldh_pcr_parasitemia_mean), fill= factor(pfhrp3_pcr_pos), color = factor(pfhrp3_pcr_pos))) +
+    geom_histogram(alpha=0.8, position = 'identity') +
+    theme_classic() + 
+    labs(fill=expression(paste(italic("pfhrp3"), " PCR Result")), color = expression(paste(italic("pfhrp3"), " PCR Result")))
+p2 <- p2 + scale_fill_manual(values = c("midnightblue", "skyblue"), breaks = c(1,0), labels = c(expression(italic("pfhrp3+")),expression(italic("pfhrp3-")))) + scale_color_manual(values = c("midnightblue", "skyblue"), breaks = c(1,0), labels = c(expression(italic("pfhrp3+")),expression(italic("pfhrp3-")))) + theme_classic() + xlab(expression("Parasites/"*mu*"L by qPCR"))  + ylab("Count") + scale_x_continuous(breaks=c(seq(1,5)), labels=c(10^seq(1,3), '10^4', '10^5'))
+
+grid.arrange(p1, p2, ncol = 1)
+
+dev.off()
+```
 
 
 
